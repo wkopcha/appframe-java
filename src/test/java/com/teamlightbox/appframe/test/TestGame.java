@@ -1,10 +1,10 @@
 package com.teamlightbox.appframe.test;
 
 import com.teamlightbox.appframe.Appframe;
+import com.teamlightbox.appframe.mesh.Mesh;
 import com.teamlightbox.appframe.mesh.MeshBuilder;
 import com.teamlightbox.appframe.util.Color;
 import org.lwjgl.glfw.GLFW;
-import org.lwjgl.opengl.GL42;
 
 public class TestGame extends Appframe {
 
@@ -14,10 +14,12 @@ public class TestGame extends Appframe {
 
     boolean color = false, prevSpaceState = false;
 
+    Mesh rect, triangle;
+
     @Override
     protected void appInit() {
 
-        addMeshToRendering(new MeshBuilder()
+        rect = new MeshBuilder()
                 .setPositions(new float[]{
                         -0.5f,  0.5f, 0.5f,
                         -0.5f, -0.5f, 0.5f,
@@ -33,10 +35,11 @@ public class TestGame extends Appframe {
                         0f, 0f, 0.5f,
                         0f, 0.5f, 0.5f
                 })
-                .build()
-        );
+                .build();
+        rect.gpuLoad();
+        addMeshToRenderQueue(rect);
 
-        addMeshToRendering(new MeshBuilder()
+        triangle = new MeshBuilder()
                 .useAlphaData()
                 .setPositions(new float[]{
                         0.7f, 0.2f, 1f,
@@ -45,8 +48,9 @@ public class TestGame extends Appframe {
                 })
                 .setIndices(new int[]{0,1,2})
                 .setColor(new Color(1, 0, 1, 0.5f))
-                .build()
-        );
+                .build();
+        triangle.gpuLoad();
+        addMeshToRenderQueue(triangle);
     }
 
     @Override
@@ -55,10 +59,14 @@ public class TestGame extends Appframe {
             close();
         if(keyPressed(GLFW.GLFW_KEY_SPACE)) {
             if(!prevSpaceState) {
-                if (!color)
-                    setClearColor(Color.WHITE);
-                else
-                    setClearColor(Color.BLACK);
+                if (!color) {
+                    triangle.gpuFree();
+                    removeMeshFromRenderQueue(triangle);
+                }
+                else {
+                    triangle.gpuLoad();
+                    addMeshToRenderQueue(triangle);
+                }
                 color = !color;
                 prevSpaceState = !prevSpaceState;
             }

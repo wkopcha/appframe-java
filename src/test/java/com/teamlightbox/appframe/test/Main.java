@@ -9,5 +9,6 @@ public class Main {
                 .setWindowName("Appframe Test")
                 .setAllowResize(true);
         Appframe game = new TestGame(gameProperties);
+        game.run();
     }
 }

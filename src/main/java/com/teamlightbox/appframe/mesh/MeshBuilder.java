@@ -1,5 +1,6 @@
 package com.teamlightbox.appframe.mesh;
 
+import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.util.Color;
 
 import java.util.Arrays;
@@ -15,14 +16,13 @@ public class MeshBuilder {
      * positions        the float array of position data (see Mesh.java)
      * colors           the float array of color data (see Mesh.java)
      * indices          the int array of index order (see Mesh.java)
-     * drawMode         the OpenGL draw mode to draw the mesh with, defaults to GL_TRIANGLES
      * useAlpha         a bool telling the builder to expect alpha information with the color input
      */
     private static Color DEFAULT_COLOR = Color.WHITE;
     private float[] positions, colors;
     private int[] indices;
-    private int drawMode = -1;
     private boolean useAlpha = false;
+    private Shader shader;
 
     public MeshBuilder(){
     }
@@ -42,9 +42,11 @@ public class MeshBuilder {
             Arrays.fill(defaultColors, DEFAULT_COLOR);
             setColors(defaultColors);
         }
-        if(drawMode == -1)
-            drawMode = GL42.GL_TRIANGLES;
-        return new Mesh(drawMode, positions, colors, indices);
+        if(shader == null)
+            shader = Shader.PASSTHROUGH;
+        Mesh mesh = new Mesh(GL42.GL_TRIANGLES, positions, colors, indices);
+        mesh.useShader(shader);
+        return mesh;
     }
 
     /**
@@ -184,22 +186,22 @@ public class MeshBuilder {
     }
 
     /**
-     * Sets the draw mode for this mesh, defaults to GL_TRIANGLES
-     * @param drawMode is the OpenGL draw mode to use
-     * @return self for chaining
-     */
-    public MeshBuilder setDrawMode(int drawMode){
-        this.drawMode = drawMode;
-        return this;
-    }
-
-    /**
      * Tells the builder to use/expect alpha color information in color inputs
      * MUST BE CALLED BEFORE SETTING COLOR DATA
      * @return self for chaining
      */
-    public MeshBuilder useAlphaData(){
+    public MeshBuilder useAlphaData() {
         this.useAlpha = true;
+        return this;
+    }
+
+    /**
+     * Tells the mesh to use a given shader
+     * @param shader is the shader for the mesh to use
+     * @return self for chaining
+     */
+    public MeshBuilder useShader(Shader shader) {
+        this.shader = shader;
         return this;
     }
 

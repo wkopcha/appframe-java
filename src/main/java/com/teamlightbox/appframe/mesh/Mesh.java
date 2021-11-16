@@ -1,10 +1,13 @@
 package com.teamlightbox.appframe.mesh;
 
+import com.teamlightbox.appframe.shader.Shader;
+import com.teamlightbox.appframe.shader.ShaderAttribute;
 import com.teamlightbox.appframe.util.IUsesNativeMemory;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.LinkedList;
 
 import static org.lwjgl.opengl.GL42.*;
 
@@ -14,14 +17,24 @@ import static org.lwjgl.opengl.GL42.*;
 public class Mesh implements IUsesNativeMemory {
 
     /**
-     * vaoId        the id of the vertex array object for this mesh's vbo s
-     * posVboId     the id of the vertex buffer object storing position data
-     * colorVboId   the id of the vertex buffer object storing color data
-     * idxVboId     the id of the vertex buffer object storing index order data
      * vertexCount  the number of vertices in the mesh
      * drawMode     the OpenGL draw mode to draw the mesh with
+     * vaoId        the id of the vertex array object for this mesh's VBOs
+     * idxVboId     the id of the vertex buffer object storing index order data
+     * vboIds       the list of vbo ids used - exact contents linked to what shader is used
+     * positions    the positions of each vertex in the mesh as a flat array
+     * colors       the color of each vertex in the mesh as a flat array
+     * indices      the order in which the vertices are drawn
+     * isOnGpu      describes if the mesh data is on the gpu or not
+     * shader       the shader that the mesh currently uses
      */
-    private final int vaoId, posVboId, colorVboId, idxVboId, vertexCount, drawMode;
+    private final int  vertexCount, drawMode;
+    private int vaoId, idxVboId;
+    private final LinkedList<Integer> vboIds = new LinkedList<>();
+    private final float[] positions, colors;
+    private final int[] indices;
+    private boolean isOnGpu = false;
+    private Shader shader;
 
     /**
      * Creates a mesh and does the OpenGL setup for getting mesh data to the GPU
@@ -32,57 +45,10 @@ public class Mesh implements IUsesNativeMemory {
      */
     Mesh(int drawMode, float[] positions, float[] colors, int[] indices){
         this.drawMode = drawMode;
-        FloatBuffer posBuffer = null;
-        FloatBuffer colorBuffer = null;
-        IntBuffer idxBuffer = null;
-        try {
-            vertexCount = indices.length;
-
-            // fill buffers with appropriate data
-            posBuffer = MemoryUtil.memAllocFloat(positions.length);
-            posBuffer.put(positions).flip();
-
-            colorBuffer = MemoryUtil.memAllocFloat(colors.length);
-            colorBuffer.put(colors).flip();
-
-            idxBuffer = MemoryUtil.memAllocInt(indices.length);
-            idxBuffer.put(indices).flip();
-
-            // create & bind the vertex array object for filling
-            vaoId = glGenVertexArrays();
-            glBindVertexArray(vaoId);
-
-            // create position vertex buffer object, enable vertex attrib pointer 0 to position data for shaders
-            posVboId = glGenBuffers();
-            glBindBuffer(GL_ARRAY_BUFFER, posVboId);
-            glBufferData(GL_ARRAY_BUFFER, posBuffer, GL_STATIC_DRAW);
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, false, 0, 0);
-
-            // create color vertex buffer object, enable vertex attrib pointer 1 to color data for shaders
-            colorVboId = glGenBuffers();
-            glBindBuffer(GL_ARRAY_BUFFER, colorVboId);
-            glBufferData(GL_ARRAY_BUFFER, colorBuffer, GL_STATIC_DRAW);
-            glVertexAttribPointer(1, 4, GL_FLOAT, false, 0, 0);
-
-            // create index order vertex buffer object
-            idxVboId = glGenBuffers();
-            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, idxVboId);
-            glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
-
-            // unbind buffers and arrays
-            glBindBuffer(GL_ARRAY_BUFFER, 0);
-            glBindVertexArray(0);
-
-        } finally {
-            // cleanup the stacks we made, we no longer need the data in our RAM; it's in the GPU by now
-            if(posBuffer != null)
-                MemoryUtil.memFree(posBuffer);
-            if(colorBuffer != null)
-                MemoryUtil.memFree(colorBuffer);
-            if(idxBuffer != null)
-                MemoryUtil.memFree(idxBuffer);
-        }
+        vertexCount = indices.length;
+        this.positions = positions;
+        this.colors = colors;
+        this.indices = indices;
     }
 
     /**
@@ -110,17 +76,138 @@ public class Mesh implements IUsesNativeMemory {
      * Cleans up resources on the GPU that the mesh uses
      */
     public void cleanup(){
-        glDisableVertexAttribArray(0);
-        glDisableVertexAttribArray(1);
+        if(isOnGpu)
+            gpuFree();
+    }
+
+    /**
+     * Removes the mesh data from the gpu
+     * Cannot remove from the gpu if the data is not there
+     */
+    public void gpuFree(){
+        if(!isOnGpu)
+            throw new IllegalStateException("Cannot free space if mesh is not on GPU!");
+
+        glBindVertexArray(vaoId);
+
+        //glDisableVertexAttribArray(0);
+        //glDisableVertexAttribArray(1);
 
         // delete vbo
         glBindBuffer(GL_ARRAY_BUFFER, 0);
-        glDeleteBuffers(posVboId);
-        glDeleteBuffers(colorVboId);
+        for(int vboId: vboIds)
+            glDeleteBuffers(vboId);
         glDeleteBuffers(idxVboId);
 
         // delete vao
         glBindVertexArray(0);
         glDeleteVertexArrays(vaoId);
+
+        isOnGpu = false;
+    }
+
+    /**
+     * Puts the mesh data on the gpu to render
+     * Cannot load to the gpu if the data is already there
+     */
+    public void gpuLoad(){
+        if(isOnGpu)
+            throw new IllegalStateException("Cannot load to GPU if already loaded!");
+
+        LinkedList<FloatBuffer> vboBuffers = new LinkedList<>();
+        IntBuffer idxBuffer = null;
+        try {
+            // fill buffers (1 per shader-given attribute) with data as provided by the shader attribute
+            LinkedList<ShaderAttribute> attributes = shader.getAttributes();
+            for(ShaderAttribute sa: attributes) {
+                float[] data = sa.getData(this);
+                FloatBuffer temp = MemoryUtil.memAllocFloat(data.length);
+                temp.put(data).flip();
+                vboBuffers.add(temp);
+            }
+
+            // fill index buffer
+            idxBuffer = MemoryUtil.memAllocInt(indices.length);
+            idxBuffer.put(indices).flip();
+
+            // create & bind the vertex array object for filling
+            vaoId = glGenVertexArrays();
+            glBindVertexArray(vaoId);
+
+            // creates the vertex buffer objects for each attribute given by the shader
+            for(int x = 0; x < attributes.size(); x++) {
+                int vboId = glGenBuffers();
+                glBindBuffer(GL_ARRAY_BUFFER, vboId);
+                glBufferData(GL_ARRAY_BUFFER, vboBuffers.get(x), GL_STATIC_DRAW);
+                //glEnableVertexAttribArray(x);
+                glVertexAttribPointer(x, attributes.get(x).getSize(), GL_FLOAT, false, 0, 0);
+                vboIds.add(vboId);
+            }
+
+            // create index order vertex buffer object
+            idxVboId = glGenBuffers();
+            glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, idxVboId);
+            glBufferData(GL_ELEMENT_ARRAY_BUFFER, idxBuffer, GL_STATIC_DRAW);
+
+            // unbind buffers and arrays
+            glBindBuffer(GL_ARRAY_BUFFER, 0);
+            glBindVertexArray(0);
+
+            isOnGpu = true;
+        } finally {
+            // cleanup the stacks we made, we no longer need the data in our RAM; it's in the GPU by now
+            for(FloatBuffer buffer: vboBuffers)
+                if(buffer != null)
+                    MemoryUtil.memFree(buffer);
+
+            if(idxBuffer != null)
+                MemoryUtil.memFree(idxBuffer);
+        }
+    }
+
+    /**
+     * Tells the mesh to use the given shader
+     * Cannot be changed when on the gpu
+     * @param shader is the new shader to make the mesh use
+     */
+    public void useShader(Shader shader) {
+        if(isOnGpu)
+            throw new IllegalStateException("Cannot set mesh shader while mesh data is on the GPU!");
+        this.shader = shader;
+    }
+
+    /**
+     * @return the shader the mesh is using
+     */
+    public Shader getShader() {
+        return shader;
+    }
+
+    /**
+     * @return the positions of each vertex as a flat array
+     */
+    public float[] getPositions() {
+        return positions;
+    }
+
+    /**
+     * @return the color of each vertex as a flat array
+     */
+    public float[] getColors() {
+        return colors;
+    }
+
+    /**
+     * @return the vertex order
+     */
+    public int[] getIndices() {
+        return indices;
+    }
+
+    /**
+     * @return whether the mesh data is on the gpu or not
+     */
+    public boolean isOnGpu(){
+        return isOnGpu;
     }
 }

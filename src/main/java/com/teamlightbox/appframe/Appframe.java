@@ -1,14 +1,14 @@
 package com.teamlightbox.appframe;
 
 import com.teamlightbox.appframe.mesh.Mesh;
+import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.util.Color;
-import com.teamlightbox.appframe.util.FileRead;
-import com.teamlightbox.appframe.util.IUsesNativeMemory;
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.*;
 import org.lwjgl.system.*;
 
 import java.nio.*;
+import java.util.HashMap;
 import java.util.LinkedList;
 
 import static org.lwjgl.glfw.Callbacks.*;
@@ -31,12 +31,9 @@ public abstract class Appframe {
     private final Properties properties;
 
     /**
-     * shaderProgram    To be removed and wrapped into some sort of mesh or meta-mesh class,
-     *      we'll see; currently handles the shaders used
-     * meshesToRender   Linked List of meshes that are rendered each frame
+     * renderQueue      Map of shaders to linked list of meshes using that shader
      */
-    ShaderProgram shaderProgram;
-    LinkedList<Mesh> meshesToRender = new LinkedList<>();
+    HashMap<Shader, LinkedList<Mesh>> renderQueue = new HashMap<>();
 
     /**
      * Creates the appframe. Must be called by subclasses
@@ -44,7 +41,12 @@ public abstract class Appframe {
      */
     public Appframe(Properties properties) {
         this.properties = properties;
+    }
 
+    /**
+     * Runs the app
+     */
+    public void run() {
         try {
             init();
             appInit();
@@ -61,9 +63,8 @@ public abstract class Appframe {
 
     /**
      * Initializes the OpenGL stuff
-     * @throws Exception if something goes wrong somewhere, which is very possible
      */
-    private void init() throws Exception {
+    private void init() {
         GLFWErrorCallback.createPrint(System.err).set();
 
         System.out.println("Initializing...");
@@ -73,17 +74,18 @@ public abstract class Appframe {
             throw new IllegalStateException("Unable to initialize GLFW");
 
         // get some basic GLFW initializations
-        // @Todo read up on what these window hints do
+        // stuff of nightmares
+        // https://www.glfw.org/docs/3.3/window_guide.html#window_hints
         glfwDefaultWindowHints();
         glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // the window will stay hidden after creation
         if (properties.allowResize)
             glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE); // the window will be resizable
         else
             glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); // the window will not be resizable
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4); // I think this is version = OpenGL4.2
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3); // I think this is min version = OpenGL3.0
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // ????
-        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // I think this allows newer versions of OpenGL to work with this
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); // I think these 2 hints specify that the window
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2); // must be compatible with OpenGL 3.2
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // Tells OpenGL to use the core profile
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // Allows newer versions of OpenGL to work with this
 
         // Creates the window for OpenGL to use, no default monitor/sharing
         windowHandle = glfwCreateWindow(properties.initWidth, properties.initHeight, properties.windowName, NULL, NULL);
@@ -126,20 +128,16 @@ public abstract class Appframe {
 
         // Set the default color for a blank window
         glClearColor(properties.clearColor.r, properties.clearColor.g, properties.clearColor.b, 0f);
+
+        // Enable alpha blending with the function dest.a = 1 - src.a
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Enable gl depth testing on a scale of [0,1] where 0 is closer
         glEnable(GL_DEPTH_TEST);
         glDepthMask(true);
         glDepthFunc(GL_LESS);
         glDepthRange(0.0f, 1.0f);
-
-
-        // Creating a default shader program
-        // @todo Move shader creation elsewhere
-        shaderProgram = new ShaderProgram();
-        shaderProgram.createVertexShader(FileRead.readResource("./shaders/vertex.vert"));
-        shaderProgram.createFragmentShader(FileRead.readResource("./shaders/fragment.frag"));
-        shaderProgram.link();
 
     }
 
@@ -190,10 +188,10 @@ public abstract class Appframe {
     private void cleanup() {
         System.out.println("Cleaning up...");
 
-        meshesToRender.forEach(Mesh::cleanup);
-
-        if(shaderProgram != null)
-            shaderProgram.cleanup();
+        for(Shader s: renderQueue.keySet()){
+            renderQueue.get(s).forEach(Mesh::cleanup);
+            s.cleanup();
+        }
     }
 
     /**
@@ -220,9 +218,6 @@ public abstract class Appframe {
     private void render() {
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT); //Clear framebuffer
 
-
-        shaderProgram.bind();
-
         /* @Todo Properly Handle resizing the screen with different modes
          *
          * Adapt this code to work:
@@ -236,21 +231,26 @@ public abstract class Appframe {
          *  - Add black bars
          *  - Expand area
          */
+        for(Shader s: renderQueue.keySet()) {
+            s.bind();
 
-        meshesToRender.forEach((Mesh mesh) -> {
-            // draw
-            glBindVertexArray(mesh.getVaoId()); // use mesh's vertex array object
-            glEnableVertexAttribArray(0); // enable position
-            glEnableVertexAttribArray(1); // enable color
-            glDrawElements(mesh.getDrawMode(), mesh.getVertexCount(), GL_UNSIGNED_INT, 0);
+            renderQueue.get(s).forEach((Mesh mesh) -> {
+                if(!mesh.isOnGpu())
+                    throw new IllegalStateException("Cannot render mesh that is not on GPU");
 
-            // restore
-            glDisableVertexAttribArray(0);
-            glDisableVertexAttribArray(1);
-            glBindVertexArray(0);
-        });
+                glBindVertexArray(mesh.getVaoId());
+                for(int x = s.getAttributes().size() - 1; x >= 0; x--)
+                    glEnableVertexAttribArray(x);
 
-        shaderProgram.unbind();
+                glDrawElements(mesh.getDrawMode(), mesh.getVertexCount(), GL_UNSIGNED_INT, 0);
+
+                for(int x = s.getAttributes().size() - 1; x >= 0; x--)
+                    glDisableVertexAttribArray(x);
+                glBindVertexArray(0);
+            });
+
+            s.unbind();
+        }
 
         glfwSwapBuffers(windowHandle); // swap color buffers
     }
@@ -274,19 +274,21 @@ public abstract class Appframe {
      * Adds a mesh to render
      * @param mesh is the mesh being added to render
      */
-    public void addMeshToRendering(Mesh mesh) {
-        meshesToRender.add(mesh);
+    public void addMeshToRenderQueue(Mesh mesh) {
+        Shader s = mesh.getShader();
+        if(!renderQueue.containsKey(s))
+            renderQueue.put(s, new LinkedList<>());
+        renderQueue.get(s).add(mesh);
     }
 
     /**
      * Removes (and potentially cleans-up) a mesh from the rendering list
      * @param mesh is the mesh to remove from the rendering list
-     * @param finishedWithMesh tells if the object will not be used again (true) or if it may be used again (false)
      */
-    public void removeMeshFromRendering(Mesh mesh, boolean finishedWithMesh) {
-        meshesToRender.remove(mesh);
-        if(finishedWithMesh)
-            mesh.cleanup();
+    public void removeMeshFromRenderQueue(Mesh mesh) {
+        Shader s = mesh.getShader();
+        if(renderQueue.containsKey(s))
+            renderQueue.get(s).remove(mesh);
     }
 
     /**
