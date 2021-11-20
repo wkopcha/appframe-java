@@ -7,7 +7,8 @@ public class Main {
     public static void main(String[] args){
         Appframe.Properties gameProperties = new Appframe.Properties()
                 .setWindowName("Appframe Test")
-                .setAllowResize(true);
+                .setAllowResize(true)
+                .shouldManageMeshGPU(false);
         Appframe game = new TestGame(gameProperties);
         game.run();
     }

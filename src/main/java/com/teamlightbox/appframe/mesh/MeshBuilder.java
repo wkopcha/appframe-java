@@ -4,7 +4,7 @@ import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.util.Color;
 
 import java.util.Arrays;
-import org.lwjgl.opengl.GL42;
+import org.lwjgl.opengl.GL45;
 
 /**
  * Class for creating meshes
@@ -17,11 +17,14 @@ public class MeshBuilder {
      * colors           the float array of color data (see Mesh.java)
      * indices          the int array of index order (see Mesh.java)
      * useAlpha         a bool telling the builder to expect alpha information with the color input
+     * dynamicPositions tells if the mesh's positions will change
+     * dynamicColors    tells if the mesh's colors will change
+     * shader           a shader the mesh will initially use, defaults to a built-in passthrough with color and position
      */
     private static Color DEFAULT_COLOR = Color.WHITE;
     private float[] positions, colors;
     private int[] indices;
-    private boolean useAlpha = false;
+    private boolean enableBlending = false, dynamicPositions = false, dynamicColors = false;
     private Shader shader;
 
     public MeshBuilder(){
@@ -44,8 +47,10 @@ public class MeshBuilder {
         }
         if(shader == null)
             shader = Shader.PASSTHROUGH;
-        Mesh mesh = new Mesh(GL42.GL_TRIANGLES, positions, colors, indices);
+        Mesh mesh = new Mesh(GL45.GL_TRIANGLES, positions, colors, indices, dynamicPositions, dynamicColors);
         mesh.useShader(shader);
+        if(enableBlending)
+            mesh.setBlend(true);
         return mesh;
     }
 
@@ -60,27 +65,13 @@ public class MeshBuilder {
     }
 
     /**
-     * Sets the color vector with a 1d list of 3d colors (r, g, b) (see Mesh.java for detail about colors)
-     * Can also use 4d colors (rgba) if useAlphaData is called
+     * Sets the color vector with a 1d list of 4d colors (r, g, b, a) (see Mesh.java for detail about colors)
      * Defaults to DEFAULT_COLOR
      * @param colors is the float array to set the colors to
      * @return self for chaining
      */
     public MeshBuilder setColors(float[] colors) {
-        if(useAlpha)
-            this.colors = colors;
-        else {
-            float[] trueColors = new float[colors.length + (colors.length / 3)]; // make space for alpha
-            for(int x = 0, y=0; x < colors.length; x++){
-                trueColors[y] = colors[x];
-                y++;
-                if(x % 3 == 2) {
-                    trueColors[y] = 1.0f;
-                    y++;
-                }
-            }
-            this.colors = trueColors;
-        }
+        this.colors = colors;
         return this;
     }
 
@@ -93,20 +84,11 @@ public class MeshBuilder {
      */
     public MeshBuilder setColors(Color[] colors) {
         float[] cs = new float[colors.length * 4];
-        if(useAlpha) {
-            for (int x = 0; x < colors.length; x++) {
-                cs[4 * x] = colors[x].r;
-                cs[4 * x + 1] = colors[x].g;
-                cs[4 * x + 2] = colors[x].b;
-                cs[4 * x + 3] = colors[x].a;
-            }
-        } else {
-            for (int x = 0; x < colors.length; x++) {
-                cs[4 * x] = colors[x].r;
-                cs[4 * x + 1] = colors[x].g;
-                cs[4 * x + 2] = colors[x].b;
-                cs[4 * x + 3] = 1.0f;
-            }
+        for (int x = 0; x < colors.length; x++) {
+            cs[4 * x] = colors[x].r;
+            cs[4 * x + 1] = colors[x].g;
+            cs[4 * x + 2] = colors[x].b;
+            cs[4 * x + 3] = colors[x].a;
         }
         this.colors = cs;
         return this;
@@ -170,9 +152,7 @@ public class MeshBuilder {
      * @return self for chaining
      */
     public MeshBuilder setColor(Color color) {
-        if(useAlpha)
-            return setColor(color.r, color.g, color.b, color.a);
-        return setColor(color.r, color.g, color.b);
+        return setColor(color.r, color.g, color.b, color.a);
     }
 
     /**
@@ -186,12 +166,30 @@ public class MeshBuilder {
     }
 
     /**
-     * Tells the builder to use/expect alpha color information in color inputs
-     * MUST BE CALLED BEFORE SETTING COLOR DATA
+     * Tells the builder to enable the blending of the mesh on creation
      * @return self for chaining
      */
-    public MeshBuilder useAlphaData() {
-        this.useAlpha = true;
+    public MeshBuilder enableBlending() {
+        this.enableBlending = true;
+        return this;
+    }
+
+    /**
+     * Tells the builder that this mesh's positions will change
+     * **NOTE: That does not mean the mesh will be transformed, but the literal data in positions[] will change**
+     * @return self for changing
+     */
+    public MeshBuilder dynamicPositions() {
+        this.dynamicPositions = true;
+        return this;
+    }
+
+    /**
+     * Tells the builder that this mesh's color will change
+     * @return self for chaining
+     */
+    public MeshBuilder dynamicColors() {
+        this.dynamicColors = true;
         return this;
     }
 

@@ -74,6 +74,46 @@ public abstract class Appframe {
             throw new IllegalStateException("Unable to initialize GLFW");
 
         // get some basic GLFW initializations
+        setGLFWHints();
+
+        createWindow();
+
+        // !! sets the OpenGL context to the window
+        glfwMakeContextCurrent(windowHandle);
+
+        //Enable vsync
+        if (properties.vsyncEnable)
+            glfwSwapInterval(1);
+
+        glfwShowWindow(windowHandle);
+
+        // This line is critical for LWJGL's interoperation with GLFW's
+        // OpenGL context, or any context that is managed externally.
+        // LWJGL detects the context that is current in the current thread,
+        // creates the GLCapabilities instance and makes the OpenGL
+        // bindings available for use.
+        GL.createCapabilities();
+
+        // Set the default color for a blank window
+        glClearColor(properties.clearColor.r, properties.clearColor.g, properties.clearColor.b, 0f);
+
+        // when alpha blending is enabled, use the function dest.a = 1 - src.a
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        // Enable gl depth testing on a scale of [0,1] where 0 is closer
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(true);
+        glDepthFunc(GL_LESS);
+        glDepthRange(0.0f, 1.0f);
+
+    }
+
+    /**
+     * Method that sets the GLFW hints for the window
+     * Protected so that implementations can override this method to set their own GLFWHints
+     * if they do not like the ones listed here
+     */
+    protected void setGLFWHints() {
         // stuff of nightmares
         // https://www.glfw.org/docs/3.3/window_guide.html#window_hints
         glfwDefaultWindowHints();
@@ -86,7 +126,12 @@ public abstract class Appframe {
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2); // must be compatible with OpenGL 3.2
         glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); // Tells OpenGL to use the core profile
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // Allows newer versions of OpenGL to work with this
+    }
 
+    /**
+     * Creates the glfw window
+     */
+    private void createWindow() {
         // Creates the window for OpenGL to use, no default monitor/sharing
         windowHandle = glfwCreateWindow(properties.initWidth, properties.initHeight, properties.windowName, NULL, NULL);
         if (windowHandle == NULL)
@@ -109,36 +154,6 @@ public abstract class Appframe {
                     (vidMode.height() - pHeight.get(0)) / 2
             );
         } // stack frame is popped automatically apparently
-
-        // !! sets the OpenGL context to the window
-        glfwMakeContextCurrent(windowHandle);
-
-        //Enable vsync
-        if (properties.vsyncEnable)
-            glfwSwapInterval(1);
-
-        glfwShowWindow(windowHandle);
-
-        // This line is critical for LWJGL's interoperation with GLFW's
-        // OpenGL context, or any context that is managed externally.
-        // LWJGL detects the context that is current in the current thread,
-        // creates the GLCapabilities instance and makes the OpenGL
-        // bindings available for use.
-        GL.createCapabilities();
-
-        // Set the default color for a blank window
-        glClearColor(properties.clearColor.r, properties.clearColor.g, properties.clearColor.b, 0f);
-
-        // Enable alpha blending with the function dest.a = 1 - src.a
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        // Enable gl depth testing on a scale of [0,1] where 0 is closer
-        glEnable(GL_DEPTH_TEST);
-        glDepthMask(true);
-        glDepthFunc(GL_LESS);
-        glDepthRange(0.0f, 1.0f);
-
     }
 
     /**
@@ -192,6 +207,8 @@ public abstract class Appframe {
             renderQueue.get(s).forEach(Mesh::cleanup);
             s.cleanup();
         }
+
+        System.out.println("Done Cleaning");
     }
 
     /**
@@ -239,13 +256,15 @@ public abstract class Appframe {
                     throw new IllegalStateException("Cannot render mesh that is not on GPU");
 
                 glBindVertexArray(mesh.getVaoId());
-                for(int x = s.getAttributes().size() - 1; x >= 0; x--)
-                    glEnableVertexAttribArray(x);
+
+                if(mesh.isMeshBlended())
+                    glEnable(GL_BLEND);
 
                 glDrawElements(mesh.getDrawMode(), mesh.getVertexCount(), GL_UNSIGNED_INT, 0);
 
-                for(int x = s.getAttributes().size() - 1; x >= 0; x--)
-                    glDisableVertexAttribArray(x);
+                if(mesh.isMeshBlended())
+                    glDisable(GL_BLEND);
+
                 glBindVertexArray(0);
             });
 
@@ -276,6 +295,8 @@ public abstract class Appframe {
      */
     public void addMeshToRenderQueue(Mesh mesh) {
         Shader s = mesh.getShader();
+        if(properties.meshManage)
+            mesh.gpuLoad();
         if(!renderQueue.containsKey(s))
             renderQueue.put(s, new LinkedList<>());
         renderQueue.get(s).add(mesh);
@@ -287,6 +308,8 @@ public abstract class Appframe {
      */
     public void removeMeshFromRenderQueue(Mesh mesh) {
         Shader s = mesh.getShader();
+        if(properties.meshManage)
+            mesh.gpuFree();
         if(renderQueue.containsKey(s))
             renderQueue.get(s).remove(mesh);
     }
@@ -300,12 +323,14 @@ public abstract class Appframe {
          * clearColor   The color that the windows refreshes as
          * vsyncEnable  Enable vsync?
          * allowResize  Allow the manual resizing of the window?
+         * meshManage   Tells the app if it should automatically load and unload meshes from the GPU or not
+         *              true means less chance of a memory leak, but false means potentially better performance
          * initWidth    The initial width of the window
          * windowName   The title of the window
          * fpsLimit     Maximum times per second the window's logic will update. Measured in seconds/frame
          */
         private Color clearColor = Color.BLACK;
-        private boolean vsyncEnable = true, allowResize = false;
+        private boolean vsyncEnable = true, allowResize = false, meshManage = true;
         private int initWidth = 1600, initHeight = 900;
         private String windowName = "Appframe Application";
         private double fpsLimit = 1d / 60d; // Default 60fps
@@ -345,6 +370,11 @@ public abstract class Appframe {
 
         public Properties setFPSLimit(double secondsPerFrame) {
             this.fpsLimit = secondsPerFrame;
+            return this;
+        }
+
+        public Properties shouldManageMeshGPU(boolean management) {
+            this.meshManage = management;
             return this;
         }
     }
