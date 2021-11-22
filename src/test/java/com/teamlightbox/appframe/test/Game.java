@@ -4,24 +4,19 @@ import com.teamlightbox.appframe.Appframe;
 import com.teamlightbox.appframe.mesh.Mesh;
 import com.teamlightbox.appframe.mesh.MeshBuilder;
 import com.teamlightbox.appframe.util.Color;
+
 import com.teamlightbox.appframe.util.Tools;
 import org.lwjgl.glfw.GLFW;
 
-public class TestGame extends Appframe {
+public class Game {
 
-    public TestGame(Properties properties){
-        super(properties);
-    }
+    private boolean color = false, prevSpaceState = false, blend = true, prevBState = false, loaded = true, prevNState = false;
 
-    boolean color = false, prevSpaceState = false, blend = true, prevBState = false, loaded = true, prevNState = false;
+    private Mesh rect, triangle;
+    private final Color triColorA = new Color(1, 0, 1, 0.5f);
+    private final Color triColorB = new Color(0, 1, 1, 0.2f);
 
-    Mesh rect, triangle;
-    Color triColorA = new Color(1, 0, 1, 0.5f);
-    Color triColorB = new Color(0, 1, 1, 0.2f);
-
-    @Override
-    protected void appInit() {
-
+    public void init(Appframe appframe) {
         rect = new MeshBuilder()
                 .setPositions(new float[]{
                         -0.5f,  0.5f, 0.5f,
@@ -40,7 +35,7 @@ public class TestGame extends Appframe {
                 })
                 .build();
         rect.gpuLoad();
-        addMeshToRenderQueue(rect);
+        appframe.addMeshToRenderQueue(rect);
 
         triangle = new MeshBuilder()
                 .setPositions(new float[]{
@@ -57,22 +52,21 @@ public class TestGame extends Appframe {
                 .dynamicColors()
                 .build();
         triangle.gpuLoad();
-        addMeshToRenderQueue(triangle);
+        appframe.addMeshToRenderQueue(triangle);
     }
 
-    @Override
-    protected void tickLogic() {
-        if(keyPressed(GLFW.GLFW_KEY_ESCAPE))
-            close();
-        if(keyPressed(GLFW.GLFW_KEY_SPACE)) {
+    public void tick(Appframe appframe) {
+        if(appframe.keyPressed(GLFW.GLFW_KEY_ESCAPE))
+            appframe.close();
+        if(appframe.keyPressed(GLFW.GLFW_KEY_SPACE)) {
             if(!prevSpaceState) {
                 if (loaded) {
                     triangle.gpuFree();
-                    removeMeshFromRenderQueue(triangle);
+                    appframe.removeMeshFromRenderQueue(triangle);
                 }
                 else {
                     triangle.gpuLoad();
-                    addMeshToRenderQueue(triangle);
+                    appframe.addMeshToRenderQueue(triangle);
                 }
                 loaded = !loaded;
                 prevSpaceState = !prevSpaceState;
@@ -80,7 +74,7 @@ public class TestGame extends Appframe {
         } else
             prevSpaceState = false;
 
-        if(keyPressed(GLFW.GLFW_KEY_N)) {
+        if(appframe.keyPressed(GLFW.GLFW_KEY_N)) {
             if(!prevNState) {
                 if (!color) {
                     triangle.changeColorData(Tools.getMeshColorArray(triangle, triColorB));
@@ -94,7 +88,7 @@ public class TestGame extends Appframe {
         } else
             prevNState = false;
 
-        if(keyPressed(GLFW.GLFW_KEY_B)) {
+        if(appframe.keyPressed(GLFW.GLFW_KEY_B)) {
             if(!prevBState) {
                 triangle.setBlend(blend);
                 blend = !blend;
@@ -103,5 +97,4 @@ public class TestGame extends Appframe {
         } else
             prevBState = false;
     }
-
 }

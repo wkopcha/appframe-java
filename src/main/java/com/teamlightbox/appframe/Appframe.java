@@ -21,14 +21,17 @@ import static org.lwjgl.system.MemoryUtil.*;
  * Main class the begins and manages most of the OpenGL nastiness
  * Should be extended by the application class and instantiated to be used
  */
-public abstract class Appframe {
+public class Appframe {
 
     /**
      * windowHandle     The identifier for OpenGL to find the window
      * properties       The properties of the AppFrame
+     * appInitFunc      The function that runs when the AppFrame is begun
+     * loopTickFunc     A function that runs every tick, meant to update logic
      */
     private long windowHandle;
     private final Properties properties;
+    private final appFunction appInitFunc, loopTickFunc;
 
     /**
      * renderQueue      Map of shaders to linked list of meshes using that shader
@@ -38,18 +41,23 @@ public abstract class Appframe {
     /**
      * Creates the appframe. Must be called by subclasses
      * @param properties are the properties of the appframe (see Appframe.Properties class)
+     * @param initFunc is the function that should run before the loop but after the window initialization
+     *                 Used to set default state of the Appframe
+     * @param tickFunc is a function that runs every tick, meant for updating application logic
      */
-    public Appframe(Properties properties) {
+    public Appframe(Properties properties, appFunction initFunc, appFunction tickFunc) {
         this.properties = properties;
+        this.appInitFunc = initFunc;
+        this.loopTickFunc = tickFunc;
     }
 
     /**
      * Runs the app
      */
-    public void run() {
+    public void begin() {
         try {
             init();
-            appInit();
+            appInitFunc.call(this);
             loop();
         } catch(Exception e) {
             e.printStackTrace();
@@ -175,7 +183,8 @@ public abstract class Appframe {
 
             // while the time until next update is
             while (timeToNextUpdate >= 1) {
-                tickLogic();
+                //tickLogic();
+                loopTickFunc.call(this);
                 updatesSinceUpdate++;
                 timeToNextUpdate--;
 
@@ -218,16 +227,6 @@ public abstract class Appframe {
     public void setClearColor(Color color){
         glClearColor(color.r, color.g, color.b, color.a);
     }
-
-    /**
-     * Method that updates application logic every tick
-     */
-    protected abstract void tickLogic();
-
-    /**
-     * Method that runs on initialization of the app (after initialization of OpenGL & GLFW)
-     */
-    protected abstract void appInit();
 
     /**
      * Clears the screen and renders all meshes in meshesToRender
@@ -377,5 +376,9 @@ public abstract class Appframe {
             this.meshManage = management;
             return this;
         }
+    }
+
+    public interface appFunction {
+        void call(Appframe appframe);
     }
 }

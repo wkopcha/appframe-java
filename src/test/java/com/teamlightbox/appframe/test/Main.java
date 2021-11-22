@@ -9,7 +9,8 @@ public class Main {
                 .setWindowName("Appframe Test")
                 .setAllowResize(true)
                 .shouldManageMeshGPU(false);
-        Appframe game = new TestGame(gameProperties);
-        game.run();
+        Game game = new Game();
+        Appframe appframe = new Appframe(gameProperties, game::init, game::tick);
+        appframe.begin();
     }
 }
