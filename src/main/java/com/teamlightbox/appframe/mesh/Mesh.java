@@ -3,10 +3,13 @@ package com.teamlightbox.appframe.mesh;
 import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.shader.ShaderAttribute;
 import com.teamlightbox.appframe.util.IUsesNativeMemory;
+import com.teamlightbox.appframe.util.Logger;
 import org.lwjgl.system.MemoryUtil;
 
 import java.nio.FloatBuffer;
 import java.nio.IntBuffer;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.LinkedList;
 
@@ -15,7 +18,7 @@ import static org.lwjgl.opengl.GL45.*;
 /**
  * Class for making the creation of shaped in OpenGl easier
  */
-public class Mesh implements IUsesNativeMemory {
+public class Mesh implements IUsesNativeMemory, AutoCloseable {
 
     /**
      * vertexCount      the number of vertices in the mesh
@@ -40,7 +43,8 @@ public class Mesh implements IUsesNativeMemory {
     private final LinkedList<ShaderAttribute> staticShaderAttributes = new LinkedList<>();
     private float[] staticMeshData;
     private final HashMap<ShaderAttribute, Integer> dynamicVboIds = new HashMap<>();
-    private float[] positions, colors;
+    private float[] positions, colors, normals;
+    private final HashMap<ShaderAttribute, Integer> attributeIdx = new HashMap<>();
     private final int[] indices;
     private boolean isOnGpu = false, blendColors = false;
     private final boolean positionValuesChange, colorValuesChange;
@@ -55,11 +59,20 @@ public class Mesh implements IUsesNativeMemory {
      * @param positionValuesChange tells if the position values of this mesh can change
      * @param colorValuesChange tells if the color values of this mesh can change
      */
-    Mesh(int drawMode, float[] positions, float[] colors, int[] indices, boolean positionValuesChange, boolean colorValuesChange){
+    Mesh(
+            int drawMode,
+            float[] positions,
+            float[] colors,
+            float[] normals,
+            int[] indices,
+            boolean positionValuesChange,
+            boolean colorValuesChange
+    ){
         this.drawMode = drawMode;
         vertexCount = indices.length;
         this.positions = positions;
         this.colors = colors;
+        this.normals = normals;
         this.indices = indices;
         this.positionValuesChange = positionValuesChange;
         this.colorValuesChange = colorValuesChange;
@@ -90,8 +103,18 @@ public class Mesh implements IUsesNativeMemory {
      * Cleans up resources on the GPU that the mesh uses
      */
     public void cleanup(){
+        Logger.verb("Cleaning " + this + "...");
         if(isOnGpu)
             gpuFree();
+        dynamicVboIds.clear();
+    }
+
+    public void close() {
+        cleanup();
+    }
+
+    public String toString() {
+        return getClass().getName() + " " + hashCode() + " with " + vertexCount + " vertices";
     }
 
     /**
@@ -115,10 +138,9 @@ public class Mesh implements IUsesNativeMemory {
             staticVboId = -1;
         }
 
-        for(ShaderAttribute dsa: dynamicVboIds.keySet()) {
-            glDeleteBuffers(dynamicVboIds.get(dsa));
-            dynamicVboIds.put(dsa, null);
-        }
+        for(int dynamicVboId: dynamicVboIds.values())
+            glDeleteBuffers(dynamicVboId);
+        dynamicVboIds.replaceAll((d, v) -> null);
         glDeleteBuffers(idxVboId);
 
         // delete vao
@@ -149,7 +171,7 @@ public class Mesh implements IUsesNativeMemory {
             vaoId = glGenVertexArrays();
             glBindVertexArray(vaoId);
 
-            int attrIdx = 0;
+            //int attrIdx = 0;
             // do we have static data? if so, run this if
             if(staticMeshData.length > 0) {
                 // create and fill static data buffer
@@ -166,9 +188,10 @@ public class Mesh implements IUsesNativeMemory {
                 // compute the vertex attribute pointers and their pointer offsets
                 // since all the data is packed together without indication in changes
                 for(ShaderAttribute sa: staticShaderAttributes) {
-                    glVertexAttribPointer(attrIdx, sa.getSize(), GL_FLOAT, false, 0, prevPtr);
+                    //glVertexAttribPointer(attrIdx, sa.getSize(), GL_FLOAT, false, 0, prevPtr);
+                    glVertexAttribPointer(attributeIdx.get(sa), sa.getSize(), GL_FLOAT, false, 0, prevPtr);
                     prevPtr = prevPtr + (long) Float.BYTES * sa.getData(this).length;
-                    attrIdx++;
+                    //attrIdx++;
                 }
 
                 // save vbo ptr
@@ -183,12 +206,14 @@ public class Mesh implements IUsesNativeMemory {
                 int vboId = glGenBuffers();
                 glBindBuffer(GL_ARRAY_BUFFER, vboId);
                 glBufferData(GL_ARRAY_BUFFER, temp, GL_DYNAMIC_DRAW);
-                glVertexAttribPointer(attrIdx, dsa.getSize(), GL_FLOAT, false, 0, 0);
-                attrIdx++;
+                //glVertexAttribPointer(attrIdx, dsa.getSize(), GL_FLOAT, false, 0, 0);
+                glVertexAttribPointer(attributeIdx.get(dsa), dsa.getSize(), GL_FLOAT, false, 0, 0);
+                //attrIdx++;
                 dynamicVboIds.put(dsa, vboId);
             }
 
-            for(int x = 0; x < attrIdx; x++)
+            //for(int x = 0; x < attrIdx; x++)
+            for(int x: attributeIdx.values())
                 glEnableVertexAttribArray(x);
 
             // create index order vertex buffer object
@@ -203,9 +228,10 @@ public class Mesh implements IUsesNativeMemory {
             isOnGpu = true;
         } finally {
             // cleanup the stacks we made, we no longer need the data in our RAM; it's in the GPU by now
-            for(FloatBuffer buffer: dynamicVboBuffers)
-                if(buffer != null)
-                    MemoryUtil.memFree(buffer);
+            dynamicVboBuffers.forEach((FloatBuffer fb) -> {
+                if(fb != null)
+                    MemoryUtil.memFree(fb);
+            });
 
             if(staticVboBuffer != null)
                 MemoryUtil.memFree(staticVboBuffer);
@@ -225,20 +251,26 @@ public class Mesh implements IUsesNativeMemory {
             throw new IllegalStateException("Cannot set mesh shader while mesh data is on the GPU!");
         this.shader = shader;
         staticShaderAttributes.clear();
-        if(positionValuesChange || colorValuesChange)
-            for(ShaderAttribute s: shader.getAttributes()) {
-                if(positionValuesChange && s.dependantOnPositionData()) {
+        int attrIdx = 0;
+        if(positionValuesChange || colorValuesChange) {
+            for (ShaderAttribute s : shader.getAttributes()) {
+                attributeIdx.put(s, attrIdx);
+                attrIdx++;
+                if (positionValuesChange && s.dependantOnPositionData()) {
                     dynamicVboIds.put(s, null);
                     continue;
                 }
-                if(colorValuesChange && s.dependantOnColorData()) {
+                if (colorValuesChange && s.dependantOnColorData()) {
                     dynamicVboIds.put(s, null);
                     continue;
                 }
                 staticShaderAttributes.add(s);
             }
-        else
+        } else {
             staticShaderAttributes.addAll(shader.getAttributes());
+            for(int x = 0; x < shader.getAttributes().size(); x++)
+                attributeIdx.put(shader.getAttributes().get(x), x);
+        }
 
         if(staticShaderAttributes.size() <= 0)
             return;
@@ -269,13 +301,16 @@ public class Mesh implements IUsesNativeMemory {
      *                        Cannot have a different number of vertices, use a different mesh for that
      *                        Vertex order is preserved
      */
-    public void changePositionData(float[] newPositionData) {
+    public void changePositionData(float[] newPositionData, float[] newNormalData) {
         if(!positionValuesChange)
             throw new IllegalArgumentException("Cannot change position data for a non-dynamic position mesh");
         if(newPositionData.length != positions.length)
             throw new IllegalArgumentException("Cannot change length of position data");
+        if(newNormalData.length != normals.length)
+            throw new IllegalArgumentException("Cannot change length of normal data");
 
         positions = newPositionData;
+        normals = newNormalData;
         //update GPU data
         if(isOnGpu)
             for(ShaderAttribute dsa: dynamicVboIds.keySet()) {
@@ -338,6 +373,10 @@ public class Mesh implements IUsesNativeMemory {
      */
     public float[] getColors() {
         return colors;
+    }
+
+    public float[] getNormals() {
+        return normals;
     }
 
     /**

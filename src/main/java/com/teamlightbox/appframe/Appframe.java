@@ -1,8 +1,10 @@
 package com.teamlightbox.appframe;
 
 import com.teamlightbox.appframe.mesh.Mesh;
+import com.teamlightbox.appframe.shader.PassThroughShader;
 import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.util.Color;
+import com.teamlightbox.appframe.util.Logger;
 import org.lwjgl.glfw.*;
 import org.lwjgl.opengl.*;
 import org.lwjgl.system.*;
@@ -31,7 +33,7 @@ public class Appframe {
      */
     private long windowHandle;
     private final Properties properties;
-    private final appFunction appInitFunc, loopTickFunc;
+    private final appFunction appInitFunc, loopTickFunc, finalFunc;
 
     /**
      * renderQueue      Map of shaders to linked list of meshes using that shader
@@ -44,11 +46,13 @@ public class Appframe {
      * @param initFunc is the function that should run before the loop but after the window initialization
      *                 Used to set default state of the Appframe
      * @param tickFunc is a function that runs every tick, meant for updating application logic
+     * @param finalFunc is a function run at the end of the window's life
      */
-    public Appframe(Properties properties, appFunction initFunc, appFunction tickFunc) {
+    public Appframe(Properties properties, appFunction initFunc, appFunction tickFunc, appFunction finalFunc) {
         this.properties = properties;
         this.appInitFunc = initFunc;
         this.loopTickFunc = tickFunc;
+        this.finalFunc = finalFunc;
     }
 
     /**
@@ -75,7 +79,7 @@ public class Appframe {
     private void init() {
         GLFWErrorCallback.createPrint(System.err).set();
 
-        System.out.println("Initializing...");
+        Logger.log("Initializing...");
 
         // initialize GLFW
         if (!glfwInit())
@@ -113,6 +117,9 @@ public class Appframe {
         glDepthMask(true);
         glDepthFunc(GL_LESS);
         glDepthRange(0.0f, 1.0f);
+
+        glEnable(GL_CULL_FACE);
+        glFrontFace(GL_CCW);
 
     }
 
@@ -198,7 +205,7 @@ public class Appframe {
             // this is for outputting fps every 1.0 seconds
             if (glfwGetTime() - timer > 1.0) {
                 timer++;
-                System.out.println("FPS: " + framesSinceUpdate + " Updates: " + updatesSinceUpdate);
+                Logger.log("FPS: " + framesSinceUpdate + " Updates: " + updatesSinceUpdate);
                 updatesSinceUpdate = 0;
                 framesSinceUpdate = 0;
             }
@@ -210,14 +217,19 @@ public class Appframe {
      * Cleans up all resources (this has access to) that needs cleaning up
      */
     private void cleanup() {
-        System.out.println("Cleaning up...");
+        Logger.log("Cleaning up...");
+
+        finalFunc.call(this);
+
+        if(PassThroughShader.get() != null)
+            PassThroughShader.get().cleanup();
 
         for(Shader s: renderQueue.keySet()){
             renderQueue.get(s).forEach(Mesh::cleanup);
             s.cleanup();
         }
 
-        System.out.println("Done Cleaning");
+        Logger.log("Done Cleaning");
     }
 
     /**
