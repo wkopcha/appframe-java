@@ -1,5 +1,6 @@
 package com.teamlightbox.appframe.mesh;
 
+import com.teamlightbox.appframe.shader.PassThroughShader;
 import com.teamlightbox.appframe.shader.Shader;
 import com.teamlightbox.appframe.util.Color;
 
@@ -46,8 +47,16 @@ public class MeshBuilder {
             setColors(defaultColors);
         }
         if(shader == null)
-            shader = Shader.PASSTHROUGH;
-        Mesh mesh = new Mesh(GL45.GL_TRIANGLES, positions, colors, indices, dynamicPositions, dynamicColors);
+            shader = PassThroughShader.get();
+        Mesh mesh = new Mesh(
+                GL45.GL_TRIANGLES,
+                positions,
+                colors,
+                MeshTools.calculateNormals(positions, indices),
+                indices,
+                dynamicPositions,
+                dynamicColors
+        );
         mesh.useShader(shader);
         if(enableBlending)
             mesh.setBlend(true);

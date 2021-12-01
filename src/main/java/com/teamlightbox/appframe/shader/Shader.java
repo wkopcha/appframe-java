@@ -1,7 +1,6 @@
 package com.teamlightbox.appframe.shader;
 
 import com.teamlightbox.appframe.ShaderProgram;
-import com.teamlightbox.appframe.util.FileRead;
 import com.teamlightbox.appframe.util.IUsesNativeMemory;
 
 import java.util.LinkedList;
@@ -14,34 +13,11 @@ import java.util.List;
 public class Shader implements IUsesNativeMemory {
 
     /**
-     * Basic (built-in) shader that just outputs a vertex's given position and color, nothing fancy
-     */
-    public static final Shader PASSTHROUGH;
-
-    /**
      * shadeProgram     the shader program itself
      * attributes       the list of attributes used in the shader program
      */
     private final ShaderProgram shaderProgram;
     private final LinkedList<ShaderAttribute> attributes = new LinkedList<>();
-
-    /*
-     * This code creates the passthrough shader
-     */
-    static {
-        Shader temp;
-        try {
-            temp = new Shader(
-                    FileRead.readResource("./shaders/vertex.vert"),
-                    FileRead.readResource("./shaders/fragment.frag"),
-                    ShaderAttribute.POSITION, ShaderAttribute.COLOR
-            );
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw new IllegalStateException("Could not create passthrough shader!");
-        }
-        PASSTHROUGH = temp;
-    }
 
     /**
      * Creates the shader from a couple of given shader files

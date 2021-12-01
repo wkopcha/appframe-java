@@ -1,13 +1,14 @@
 package com.teamlightbox.appframe;
 
 import com.teamlightbox.appframe.util.IUsesNativeMemory;
+import com.teamlightbox.appframe.util.Logger;
 
 import static org.lwjgl.opengl.GL42.*;
 
 /**
  * Class for creating and storing a shader program
  */
-public class ShaderProgram implements IUsesNativeMemory {
+public class ShaderProgram implements IUsesNativeMemory, AutoCloseable {
 
     /**
      * programId            the id of the shader program
@@ -93,7 +94,7 @@ public class ShaderProgram implements IUsesNativeMemory {
         // check if everything's good
         glValidateProgram(programId);
         if(glGetProgrami(programId, GL_VALIDATE_STATUS) == GL_FALSE)
-            System.err.println("Warning validating shader code: " + glGetProgramInfoLog(programId, 1024));
+            Logger.err("Warning validating shader code: " + glGetProgramInfoLog(programId, 1024));
     }
 
     /**
@@ -114,6 +115,7 @@ public class ShaderProgram implements IUsesNativeMemory {
      * Cleanup the shader by deleting all existing shaders in the program
      */
     public void cleanup(){
+        Logger.verb("Cleaning " + this + "...");
         unbind();
         if(programId != 0)
             glDeleteProgram(programId);
@@ -123,5 +125,13 @@ public class ShaderProgram implements IUsesNativeMemory {
 
         if(fragmentShaderId != 0)
             glDeleteShader(fragmentShaderId);
+    }
+
+    public void close() {
+        cleanup();
+    }
+
+    public String toString() {
+        return getClass().getName() + " " + hashCode();
     }
 }

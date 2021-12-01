@@ -1,5 +1,6 @@
 package com.teamlightbox.appframe.shader;
 
+import com.teamlightbox.appframe.glsl.util.GLSLDataType;
 import com.teamlightbox.appframe.mesh.Mesh;
 
 /**
@@ -16,14 +17,7 @@ public class ShaderAttribute {
      */
     public static final ShaderAttribute POSITION = new ShaderAttribute(3, Mesh::getPositions, true, false);
     public static final ShaderAttribute COLOR = new ShaderAttribute(4, Mesh::getColors, false, true);
-   /* public static final ShaderAttribute VERTEX_NORMAL = new ShaderAttribute(3, (Mesh mesh) -> {
-        float[] normal = new float[mesh.getPositions().length];
-        float[] positions = mesh.getPositions();
-        int[] idxs = mesh.getIndices();
-
-
-        return normal;
-    });*/
+    public static final ShaderAttribute VERTEX_NORMAL = new ShaderAttribute(3, Mesh::getNormals, true, false);
     //public static final ShaderAttribute TEX_COORD_1 = new ShaderAttribute(2, (Mesh mesh) -> new float[]{0, 0});
     //public static final ShaderAttribute TEX_COORD_2 = new ShaderAttribute(2, (Mesh mesh) -> new float[]{0, 0});
 
