@@ -1,5 +1,5 @@
 # appframe-java
-A simple Java OpenGL library for creating applications
+A simple Java OpenGL library for creating applications (still WIP, slowly)
 
 
 # Resources used while developing
