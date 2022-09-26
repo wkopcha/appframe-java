@@ -1,7 +1,7 @@
 #version 420 core
 
 in vec4 exColor;
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main() {
     if(exColor.a <= 0.1)
